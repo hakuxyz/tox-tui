@@ -254,7 +254,7 @@ extern "C" fn on_file_recv(
 }
 
 extern "C" fn on_file_recv_chunk(
-    _tox: *mut tox_sys::Tox,
+    tox: *mut tox_sys::Tox,
     friend_number: u32,
     file_number: u32,
     position: u64,
@@ -321,11 +321,28 @@ extern "C" fn on_file_recv_chunk(
         }
         Outcome::Fail(reason) => {
             log::error!("receive {reason} for {friend_number}/{file_number}");
-            if let Some(inc) = st.incoming.remove(&key) {
+            let dest = st.incoming.remove(&key).map(|inc| inc.dest);
+            drop(st);
+            // tell toxcore to stop sending, not just drop local state
+            let mut err = tox_sys::Tox_Err_File_Control::Ok;
+            unsafe {
+                tox_sys::tox_file_control(
+                    tox,
+                    friend_number,
+                    file_number,
+                    tox_sys::Tox_File_Control::Cancel,
+                    &mut err,
+                );
+            }
+            if let Some(dest) = dest {
                 let _ = ctx.events.send(ToxEvent::Notice(format!(
                     "receive failed ({reason}): {}",
-                    inc.dest.display()
+                    dest.display()
                 )));
+            } else {
+                let _ = ctx
+                    .events
+                    .send(ToxEvent::Notice(format!("receive failed ({reason})")));
             }
         }
     }
