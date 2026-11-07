@@ -4,58 +4,46 @@ a modern tox client that lives in your terminal :)
 
 ![main screen](docs/screenshot-main.png)
 
-tox is peer-to-peer messaging with end-to-end encryption, no phone number, no
-server holding your chats. most of the old clients (utox, qtox) are pretty much
-dead, so i built this one in rust with ratatui.
+tox is peer-to-peer messaging with end-to-end encryption. no phone number, no
+central server holding your chats. most of the old desktop clients (utox,
+qtox) are basically abandoned, so this is a fresh one written in rust.
 
-## what it does
+## features
 
-- identity that sticks around between restarts (tox.save + identity.json)
-- friend requests, online status, nicknames, status messages
-- real-time chat with local history saved as jsonl per friend
-- file transfers that show progress on disk
+- identity that survives restarts (`tox.save` + `identity.json`)
+- friend requests, presence, nicknames, status messages
+- realtime chat with per-friend jsonl history on disk
+- chunked file transfers with on-disk progress
 - themes: default, light, nord, gruvbox, solarized dark/light, dracula,
-  monochrome, plus your own in themes.toml
-- one key to copy your tox id (works over ssh via osc 52)
-- number keys to jump straight to a friend, mouse support too
+  monochrome, plus custom palettes in `themes.toml`
+- one key copies your tox id (osc 52, so it works over ssh)
+- number keys jump to a friend, mouse click/scroll works too
 
-## a quick look
+## screenshots
 
-**help overlay** (press `F1` or `?`)
+| help (`F1`) | themes (`t`) |
+|-------------|--------------|
+| ![help](docs/screenshot-help.png) | ![themes](docs/screenshot-themes.png) |
 
-![help](docs/screenshot-help.png)
+| your id (`c`) | add friend (`a`) |
+|---------------|------------------|
+| ![id](docs/screenshot-tox-id.png) | ![add](docs/screenshot-add-friend.png) |
 
-**theme picker** (press `t`)
+| nord | dracula |
+|------|---------|
+| ![nord](docs/screenshot-nord.png) | ![dracula](docs/screenshot-dracula.png) |
 
-![themes](docs/screenshot-themes.png)
+## crates
 
-**copy your tox id** (press `c`)
+| path | role |
+|------|------|
+| `crates/tox-sys` | raw ffi to [c-toxcore](https://github.com/TokTok/c-toxcore) |
+| `crates/tox-client` | async wrapper: identity, history, commands/events, transfers |
+| `crates/tox-tui` | terminal ui (ratatui + crossterm) |
 
-![tox id](docs/screenshot-tox-id.png)
-
-**add a friend** (press `a`)
-
-![add friend](docs/screenshot-add-friend.png)
-
-**nord theme**
-
-![nord](docs/screenshot-nord.png)
-
-**dracula theme**
-
-![dracula](docs/screenshot-dracula.png)
-
-## how it's put together
-
-| crate | what it does |
-|-------|----------------|
-| `crates/tox-sys` | raw ffi bindings to [c-toxcore](https://github.com/TokTok/c-toxcore) |
-| `crates/tox-client` | safe async wrapper: identity, history, commands/events, file transfers |
-| `crates/tox-tui` | the terminal ui (ratatui + crossterm) |
-
-there's a pure-rust `tox` crate on crates.io but it last shipped in 2020 and
-never grew a real client api, so this project talks to c-toxcore directly.
-crypto all lives in c-toxcore; the rust side just moves bytes around.
+the pure-rust `tox` crate on crates.io stopped at 2020 and never grew a real
+client api, so this talks to c-toxcore directly. crypto lives in c-toxcore;
+the rust side just shuttles bytes.
 
 ```
 ui thread (tokio + crossterm)          core thread (tox_iterate loop)
@@ -66,11 +54,11 @@ ui thread (tokio + crossterm)          core thread (tox_iterate loop)
         │                                      │
 ```
 
-## building it
+## build
 
-you'll need rust stable (1.80+), a c toolchain with cmake, and libsodium.
+you need rust stable (1.80+), cmake, a c compiler, and libsodium.
 
-first build c-toxcore into a local prefix (no root needed):
+build c-toxcore into a local prefix first (no root needed):
 
 ```bash
 git clone --depth 1 --branch v0.2.24 https://github.com/TokTok/c-toxcore.git vendor/c-toxcore
@@ -90,28 +78,29 @@ then the client:
 
 ```bash
 cargo build --release
+export LD_LIBRARY_PATH=$PWD/local/lib
 ./target/release/tox-tui
 ```
 
-point the build at a different install with `TOXCORE_PREFIX=/path/to/prefix`.
+`TOXCORE_PREFIX=/path/to/prefix` points the build at a different c-toxcore
+install.
 
-at runtime you may need:
+## test
 
 ```bash
 export LD_LIBRARY_PATH=$PWD/local/lib
-```
-
-## tests
-
-```bash
 cargo test
+cargo clippy --all-targets -- -D warnings
 ```
 
-the integration tests spin up two tox instances, bootstrap them to each other
-over udp on 127.0.0.1, and check friend requests, chat, identity persistence,
-and a 64 kib file transfer. no internet required, which is nice.
+the integration suite starts two tox instances, bootstraps them to each other
+over loopback udp, and checks friend requests, chat, identity reload, and a
+64 kib file transfer. no internet required.
 
-## keybindings
+release profile is already set up with thin lto, one codegen unit, and
+symbols stripped. `cargo build --release` gives you a single ~2.7 mb binary.
+
+## keys
 
 | key | action |
 |-----|--------|
@@ -131,8 +120,7 @@ and a 64 kib file transfer. no internet required, which is nice.
 | `Esc` | close dialog / clear input / leave input |
 | `Ctrl+Q` / `Ctrl+C` | quit (saves identity) |
 
-mouse works too: click sidebar rows to select, scroll the chat, click chat to
-focus it.
+mouse: click sidebar rows, scroll the chat, click chat to focus it.
 
 ### slash commands
 
@@ -151,7 +139,7 @@ focus it.
 /quit                     exit
 ```
 
-## configuration
+## config
 
 | env var | meaning |
 |---------|---------|
@@ -161,7 +149,7 @@ focus it.
 | `TOXCORE_PREFIX` | c-toxcore install prefix (build-time) |
 | `RUST_LOG` | log filter on stderr, e.g. `tox_client=debug` |
 
-where stuff lives:
+on disk:
 
 ```
 $TOX_TUI_DATA_DIR/
@@ -171,16 +159,6 @@ $TOX_TUI_DATA_DIR/
 └── history/
     └── <friend-pk>.jsonl
 ```
-
-## goals
-
-1. secure by default. all crypto stays in c-toxcore; we never touch plaintext
-   keys outside the save file.
-2. light on resources. one iterate loop around 1 ms, ui redraws every 50 ms,
-   release binary is a couple mb.
-3. nothing blocks. network events come in over channels, keyboard input never
-   waits on the wire.
-4. testable offline. full protocol flows run without internet.
 
 ## license
 
