@@ -29,12 +29,18 @@ where
 {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if let Some(ev) = tox.recv_event().await {
-            if pred(&ev) {
-                return true;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(remaining, tox.recv_event()).await {
+            Ok(Some(ev)) => {
+                if pred(&ev) {
+                    return true;
+                }
             }
-        } else {
-            return false;
+            Ok(None) => return false,
+            Err(_) => return false,
         }
     }
     false
@@ -369,14 +375,22 @@ async fn file_transfer_roundtrip() {
     let mut incoming = None;
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline && incoming.is_none() {
-        if let Some(ToxEvent::FileRecv {
-            friend_number,
-            file_number,
-            filename,
-            file_size,
-        }) = b.recv_event().await.as_ref()
-        {
-            incoming = Some((*friend_number, *file_number, filename.clone(), *file_size));
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(remaining, b.recv_event()).await {
+            Ok(Some(ToxEvent::FileRecv {
+                friend_number,
+                file_number,
+                filename,
+                file_size,
+            })) => {
+                incoming = Some((friend_number, file_number, filename, file_size));
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => break,
+            Err(_) => break,
         }
     }
     let (b_friend, b_file, filename, size) = incoming.expect("B should receive file offer");
@@ -391,17 +405,16 @@ async fn file_transfer_roundtrip() {
     })
     .unwrap();
 
-    // Wait for completion notice or for the file to land.
+    // Wait until the full payload is on disk. Notices are only for pumping.
     let mut done = false;
     let deadline = Instant::now() + Duration::from_secs(45);
     while Instant::now() < deadline && !done {
-        // Check disk.
         if let Ok(rd) = std::fs::read_dir(&dest) {
             for e in rd.flatten() {
                 let p = e.path();
                 if p.extension().map(|x| x == "bin").unwrap_or(false) {
                     if let Ok(bytes) = std::fs::read(&p) {
-                        if bytes == payload {
+                        if bytes.len() == payload.len() && bytes == payload {
                             done = true;
                             break;
                         }
@@ -409,22 +422,18 @@ async fn file_transfer_roundtrip() {
                 }
             }
         }
-        // Also pump events so the core keeps running (it runs on its own
-        // thread, but draining avoids channel backpressure).
-        if let Some(ToxEvent::Notice(n)) = b.try_recv_event() {
-            if n.starts_with("received") {
-                done = true;
-            }
+        // pump events so the core keeps running (drain avoids backpressure)
+        let _ = b.try_recv_event();
+        let _ = a.try_recv_event();
+        if !done {
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        if let Some(ToxEvent::Notice(n)) = a.try_recv_event() {
-            if n.starts_with("finished sending") {
-                // give B a moment to write
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    assert!(done, "file transfer did not complete in time");
+    assert!(
+        done,
+        "file transfer did not complete (size/content mismatch or timeout)"
+    );
     let _ = b_pk;
     let _ = a;
 
