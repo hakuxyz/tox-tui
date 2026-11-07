@@ -796,34 +796,49 @@ fn handle_command(
             file_number,
             dest_dir,
         } => {
+            // peek only: keep the offer until dir+file are ready
             let pending = {
-                let mut st = state.lock().unwrap();
-                st.pending_incoming.remove(&(friend_number, file_number))
+                let st = state.lock().unwrap();
+                st.pending_incoming
+                    .get(&(friend_number, file_number))
+                    .cloned()
             };
             let Some((filename, file_size)) = pending else {
                 let _ = events.send(ToxEvent::Notice("no such incoming file".into()));
                 return;
             };
-            let _ = create_dir_private(&dest_dir);
-            let safe_name = sanitize_filename(&filename);
-            match unique_path_for(&dest_dir, &safe_name) {
-                Ok((dest, f)) => {
-                    finish_accept(
-                        tox,
-                        state,
-                        events,
-                        friend_number,
-                        file_number,
-                        f,
-                        dest,
-                        file_size,
-                        &filename,
-                    );
-                }
-                Err(e) => {
-                    let _ = events.send(ToxEvent::Notice(format!("create failed: {e}")));
-                }
+            if let Err(e) = create_dir_private(&dest_dir) {
+                let _ = events.send(ToxEvent::Notice(format!(
+                    "create dir failed: {e} (offer kept, retry or cancel)"
+                )));
+                return;
             }
+            let safe_name = sanitize_filename(&filename);
+            let (dest, f) = match unique_path_for(&dest_dir, &safe_name) {
+                Ok(prepared) => prepared,
+                Err(e) => {
+                    let _ = events.send(ToxEvent::Notice(format!(
+                        "create file failed: {e} (offer kept, retry or cancel)"
+                    )));
+                    return;
+                }
+            };
+            // destination is ready: consume the offer
+            {
+                let mut st = state.lock().unwrap();
+                st.pending_incoming.remove(&(friend_number, file_number));
+            }
+            finish_accept(
+                tox,
+                state,
+                events,
+                friend_number,
+                file_number,
+                f,
+                dest,
+                file_size,
+                &filename,
+            );
         }
         ToxCommand::CancelFile {
             friend_number,
@@ -1038,7 +1053,20 @@ fn finish_accept(
             dest.display()
         )));
     } else {
-        let _ = events.send(ToxEvent::Notice(format!("accept failed: {err:?}")));
+        // offer already consumed: cancel explicitly so state stays consistent
+        let mut cerr = tox_sys::Tox_Err_File_Control::Ok;
+        unsafe {
+            tox_sys::tox_file_control(
+                tox,
+                friend_number,
+                file_number,
+                tox_sys::Tox_File_Control::Cancel,
+                &mut cerr,
+            );
+        }
+        let _ = events.send(ToxEvent::Notice(format!(
+            "accept failed ({err:?}), transfer cancelled: {filename}"
+        )));
     }
 }
 
