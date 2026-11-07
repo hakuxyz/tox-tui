@@ -1064,6 +1064,13 @@ fn finish_accept(
                 &mut cerr,
             );
         }
+        // no bytes were written: remove the freshly created empty target
+        drop(f);
+        if let Err(e) = std::fs::remove_file(&dest) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("failed to remove {}: {e}", dest.display());
+            }
+        }
         let _ = events.send(ToxEvent::Notice(format!(
             "accept failed ({err:?}), transfer cancelled: {filename}"
         )));

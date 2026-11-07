@@ -323,22 +323,27 @@ async fn file_transfer_roundtrip() {
     let mut a_fn = None;
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
-        match a.recv_event().await {
-            Some(ToxEvent::FriendList(list)) => {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(remaining, a.recv_event()).await {
+            Ok(Some(ToxEvent::FriendList(list))) => {
                 if let Some(f) = list.iter().find(|f| f.connection.is_online()) {
                     a_fn = Some(f.number);
                     break;
                 }
             }
-            Some(ToxEvent::Friend {
+            Ok(Some(ToxEvent::Friend {
                 friend_number,
                 event: tox_client::FriendEvent::Connected(status),
-            }) if status.is_online() => {
+            })) if status.is_online() => {
                 a_fn = Some(friend_number);
                 break;
             }
-            Some(_) => {}
-            None => break,
+            Ok(Some(_)) => {}
+            Ok(None) => break,
+            Err(_) => break, // deadline: no event within remaining time
         }
     }
     let a_fn = a_fn.expect("A friend must be online before starting a file transfer");
