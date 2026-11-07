@@ -1,61 +1,64 @@
 # tox-tui
 
-A modern, secure terminal client for the [Tox](https://tox.chat) peer-to-peer
-messenger — written in Rust, built to replace dead C/C++ clients like uTox and
-qTox.
+a modern tox client that lives in your terminal :)
+
+![main screen](docs/screenshot-main.png)
+
+tox is peer-to-peer messaging with end-to-end encryption, no phone number, no
+server holding your chats. most of the old clients (utox, qtox) are pretty much
+dead, so i built this one in rust with ratatui.
+
+## what it does
+
+- identity that sticks around between restarts (tox.save + identity.json)
+- friend requests, online status, nicknames, status messages
+- real-time chat with local history saved as jsonl per friend
+- file transfers that show progress on disk
+- themes: default, light, nord, gruvbox, solarized dark/light, dracula,
+  monochrome, plus your own in themes.toml
+- one key to copy your tox id (works over ssh via osc 52)
+- number keys to jump straight to a friend, mouse support too
+
+## a quick look
+
+**help overlay** (press `F1` or `?`)
+
+![help](docs/screenshot-help.png)
+
+**theme picker** (press `t`)
+
+![themes](docs/screenshot-themes.png)
+
+**copy your tox id** (press `c`)
+
+![tox id](docs/screenshot-tox-id.png)
+
+**add a friend** (press `a`)
+
+![add friend](docs/screenshot-add-friend.png)
+
+**nord theme**
+
+![nord](docs/screenshot-nord.png)
+
+**dracula theme**
+
+![dracula](docs/screenshot-dracula.png)
+
+## how it's put together
+
+| crate | what it does |
+|-------|----------------|
+| `crates/tox-sys` | raw ffi bindings to [c-toxcore](https://github.com/TokTok/c-toxcore) |
+| `crates/tox-client` | safe async wrapper: identity, history, commands/events, file transfers |
+| `crates/tox-tui` | the terminal ui (ratatui + crossterm) |
+
+there's a pure-rust `tox` crate on crates.io but it last shipped in 2020 and
+never grew a real client api, so this project talks to c-toxcore directly.
+crypto all lives in c-toxcore; the rust side just moves bytes around.
 
 ```
-┌──────────────┬────────────────────────────────────┐
-│ tox-tui      │ you        online                 │
-│              │ id:a1b2c3d4…                       │
-│ ── friends ──│ ── Chat ────────────────────────── │
-│ ▶ ● alice    │ [14:02] alice: hey                 │
-│   ○ bob      │ [14:02] you: hi!                   │
-│              │                                    │
-│ ── transfers │ Select a friend, or press 'a' to   │
-│   ↓ note.txt │ add one.                           │
-├──────────────┴────────────────────────────────────┤
-│ > type a message…  (/help for commands)           │
-└───────────────────────────────────────────────────┘
- friends:1/2  requests:0  F1 help · Tab focus · …
-```
-
-## Features
-
-- **Identity** — generates, persists, and reloads your Tox ID / keys
-  (`tox.save` + `identity.json`) across restarts
-- **Friends** — send/accept/decline friend requests, live online status,
-  nicknames, status messages, typing indicators
-- **Messaging** — real-time text chat with local JSONL history per friend
-- **File transfers** — chunk-based P2P transfers with accept/reject prompts
-  and on-disk progress (saved under `~/Downloads/tox-downloads/`)
-- **TUI** — responsive ratatui + crossterm interface: sidebar, chat pane,
-  input bar, modal dialogs, help overlay
-- **Themes** — 8 built-ins (`default`, `light`, `nord`, `gruvbox`,
-  `solarized-dark`, `solarized-light`, `dracula`, `monochrome`) plus custom
-  palettes in `themes.toml` next to your save data
-- **Tox ID copy** — one-key copy via OSC 52 (works over SSH) with a full-ID
-  dialog; falls back to `wl-copy` / `xclip` / `xsel` / `pbcopy`
-- **Navigation** — number keys `1–9`/`0` jump to friends, `n`/`p` cycle,
-  mouse click/scroll in the sidebar and chat
-- **Async core** — tokio event loop bridges c-toxcore callbacks to the UI
-  without freezing input
-
-## Architecture
-
-| Crate | Role |
-|-------|------|
-| `crates/tox-sys` | Raw FFI bindings to [c-toxcore](https://github.com/TokTok/c-toxcore) (`tox.h` 0.2.x) |
-| `crates/tox-client` | Safe async wrapper: identity, history, commands/events, file-transfer state machine |
-| `crates/tox-tui` | Terminal UI (ratatui + crossterm) |
-
-The pure-Rust [`tox`](https://crates.io/crates/tox) crate (last release 2020)
-lacks a high-level client API (messaging, file transfer, callbacks), so this
-project binds directly to the actively maintained c-toxcore reference
-implementation.
-
-```
-UI thread (tokio + crossterm)          core thread (tox_iterate loop)
+ui thread (tokio + crossterm)          core thread (tox_iterate loop)
         │                                      │
         │── ToxCommand ──►  mpsc  ──►──────────┤
         │                                      │  tox_iterate(user_data)
@@ -63,16 +66,11 @@ UI thread (tokio + crossterm)          core thread (tox_iterate loop)
         │                                      │
 ```
 
-## Building
+## building it
 
-### Prerequisites
+you'll need rust stable (1.80+), a c toolchain with cmake, and libsodium.
 
-- Rust stable (1.80+)
-- C toolchain + CMake (for c-toxcore)
-- `libsodium` (dev package)
-- Optional: `libclang` if you switch `tox-sys` to bindgen
-
-### Build c-toxcore (local prefix, no root required)
+first build c-toxcore into a local prefix (no root needed):
 
 ```bash
 git clone --depth 1 --branch v0.2.24 https://github.com/TokTok/c-toxcore.git vendor/c-toxcore
@@ -88,96 +86,102 @@ cmake --build vendor/c-toxcore/build -j$(nproc)
 cmake --install vendor/c-toxcore/build
 ```
 
-Point the build at a different install with `TOXCORE_PREFIX=/path/to/prefix`.
-
-### Build the client
+then the client:
 
 ```bash
 cargo build --release
 ./target/release/tox-tui
 ```
 
-### Tests
+point the build at a different install with `TOXCORE_PREFIX=/path/to/prefix`.
+
+at runtime you may need:
 
 ```bash
-cargo test                 # unit + offline integration tests
+export LD_LIBRARY_PATH=$PWD/local/lib
 ```
 
-Integration tests spin up **two Tox instances on loopback**, cross-bootstrap
-them over UDP (`127.0.0.1`), and verify friend requests, bidirectional chat,
-identity persistence, and a 64 KiB file transfer — no public network needed.
+## tests
 
-## Keybindings
+```bash
+cargo test
+```
 
-| Key | Action |
+the integration tests spin up two tox instances, bootstrap them to each other
+over udp on 127.0.0.1, and check friend requests, chat, identity persistence,
+and a 64 kib file transfer. no internet required, which is nice.
+
+## keybindings
+
+| key | action |
 |-----|--------|
-| `Tab` / `←→` | Cycle focus (sidebar ↔ chat ↔ input) |
-| `↑↓` / `j k` | Move selection / scroll chat |
-| `1–9` / `0` | Jump to friend #1–9 / #10 |
-| `n` / `p` (also `]` / `[`) | Next / previous friend |
-| `Enter` | Accept request · focus input · send message |
-| `a` | Add friend |
-| `c` | Show + copy your Tox ID (OSC 52) |
-| `t` | Theme picker |
-| `f` | Send file to current friend |
-| `r` | Decline friend request |
-| `i` | Set nickname |
-| `s` | Set status message |
-| `F1` / `?` | Help overlay |
-| `Esc` | Close dialog / clear input / leave input |
-| `Ctrl+Q` / `Ctrl+C` | Quit (saves identity) |
+| `Tab` / `←→` | cycle focus (sidebar, chat, input) |
+| `↑↓` / `j k` | move selection / scroll chat |
+| `1-9` / `0` | jump to friend #1-9 / #10 |
+| `n` / `p` (or `]` / `[`) | next / previous friend |
+| `Enter` | accept request, focus input, send message |
+| `a` | add friend |
+| `c` | show + copy your tox id |
+| `t` | theme picker |
+| `f` | send a file |
+| `r` | decline a friend request |
+| `i` | set nickname |
+| `s` | set status message |
+| `F1` / `?` | help |
+| `Esc` | close dialog / clear input / leave input |
+| `Ctrl+Q` / `Ctrl+C` | quit (saves identity) |
 
-Mouse: click sidebar rows to select, scroll chat to page history, click chat
-to focus it.
+mouse works too: click sidebar rows to select, scroll the chat, click chat to
+focus it.
 
-### Slash commands (in the input bar)
+### slash commands
 
 ```
 /add <ToxID> [greeting]   send a friend request
 /file <path>              send a file to the current friend
-/me <text>                action (/me-style) message
+/me <text>                action message
 /name <nick>              set nickname
 /status <text>            set status message
-/id                       show your Tox ID (dialog; y re-copies)
-/copy                     copy your Tox ID to the clipboard
-/theme [name]             list themes, or apply one by name
-/themes                   same as /theme (list)
+/id                       show your tox id (dialog)
+/copy                     copy your tox id
+/theme [name]             list themes or apply one
+/themes                   same as /theme
 /clear                    clear visible chat (history on disk kept)
 /help                     keybinding help
 /quit                     exit
 ```
 
-## Configuration
+## configuration
 
-| Env var | Meaning |
+| env var | meaning |
 |---------|---------|
-| `TOX_TUI_DATA_DIR` | State directory (default: `~/.local/share/tox-tui`) |
-| `TOX_TUI_NAME` | Nickname applied on first run |
-| `TOX_TUI_STATUS` | Status message applied on first run |
+| `TOX_TUI_DATA_DIR` | state directory (default `~/.local/share/tox-tui`) |
+| `TOX_TUI_NAME` | nickname on first run |
+| `TOX_TUI_STATUS` | status message on first run |
 | `TOXCORE_PREFIX` | c-toxcore install prefix (build-time) |
-| `RUST_LOG` | Log filter (stderr), e.g. `tox_client=debug` |
+| `RUST_LOG` | log filter on stderr, e.g. `tox_client=debug` |
 
-State layout:
+where stuff lives:
 
 ```
 $TOX_TUI_DATA_DIR/
-├── tox.save          # full Tox savedata (keys, friends, …)
+├── tox.save          # full tox savedata (keys, friends, ...)
 ├── identity.json     # human-readable address / public key
 ├── themes.toml       # custom theme palettes (seeded with an example)
 └── history/
-    └── <friend-pk>.jsonl   # append-only chat history
+    └── <friend-pk>.jsonl
 ```
 
-## Project goals
+## goals
 
-1. **Secure by default** — all crypto lives in c-toxcore; the client never
-   handles plaintext keys outside the save file.
-2. **Low resource usage** — single iterate loop (~1 ms ticks), no busy-polling
-   UI (50 ms draw tick), stripped release binary ≈ 2.3 MB.
-3. **Non-blocking** — network events update state via channels; keyboard input
-   never waits on the wire.
-4. **Offline-testable** — full protocol flows verified without internet.
+1. secure by default. all crypto stays in c-toxcore; we never touch plaintext
+   keys outside the save file.
+2. light on resources. one iterate loop around 1 ms, ui redraws every 50 ms,
+   release binary is a couple mb.
+3. nothing blocks. network events come in over channels, keyboard input never
+   waits on the wire.
+4. testable offline. full protocol flows run without internet.
 
-## License
+## license
 
 GPL-3.0-or-later (same as c-toxcore).
