@@ -1,6 +1,11 @@
 // raw FFI to c-toxcore (tox.h 0.2.x) — only what the client needs
 
-#![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code)]
+#![allow(
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    dead_code
+)]
 
 use std::os::raw::{c_char, c_uint, c_void};
 
@@ -373,10 +378,8 @@ extern "C" {
     pub fn tox_options_set_ipv6_enabled(options: *mut Tox_Options, ipv6_enabled: bool);
     pub fn tox_options_set_udp_enabled(options: *mut Tox_Options, udp_enabled: bool);
     pub fn tox_options_set_proxy_type(options: *mut Tox_Options, proxy_type: Tox_Proxy_Type);
-    pub fn tox_options_set_proxy_host(
-        options: *mut Tox_Options,
-        proxy_host: *const c_char,
-    ) -> bool;
+    pub fn tox_options_set_proxy_host(options: *mut Tox_Options, proxy_host: *const c_char)
+        -> bool;
     pub fn tox_options_set_proxy_port(options: *mut Tox_Options, proxy_port: u16);
     pub fn tox_options_set_savedata_type(
         options: *mut Tox_Options,
@@ -392,10 +395,7 @@ extern "C" {
         options: *mut Tox_Options,
         local_discovery_enabled: bool,
     );
-    pub fn tox_options_set_log_callback(
-        options: *mut Tox_Options,
-        callback: Option<tox_log_cb>,
-    );
+    pub fn tox_options_set_log_callback(options: *mut Tox_Options, callback: Option<tox_log_cb>);
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +452,11 @@ extern "C" {
     ) -> bool;
     pub fn tox_self_get_status_message_size(tox: *const Tox) -> usize;
     pub fn tox_self_get_status_message(tox: *const Tox, status_message: *mut u8);
-    pub fn tox_self_set_typing(tox: *mut Tox, friend_number: Tox_Friend_Number, typing: bool) -> bool;
+    pub fn tox_self_set_typing(
+        tox: *mut Tox,
+        friend_number: Tox_Friend_Number,
+        typing: bool,
+    ) -> bool;
     pub fn tox_self_get_connection_status(tox: *const Tox) -> Tox_Connection;
     pub fn tox_self_get_dht_id(tox: *const Tox, dht_id: *mut Tox_Dht_Id);
     pub fn tox_self_get_udp_port(tox: *const Tox, error: *mut Tox_Err_Get_Port) -> u16;
@@ -492,10 +496,7 @@ extern "C" {
         public_key: *mut Tox_Public_Key,
         error: *mut Tox_Err_Friend_Get_Public_Key,
     ) -> bool;
-    pub fn tox_friend_get_last_online(
-        tox: *const Tox,
-        friend_number: Tox_Friend_Number,
-    ) -> u64;
+    pub fn tox_friend_get_last_online(tox: *const Tox, friend_number: Tox_Friend_Number) -> u64;
     pub fn tox_friend_get_name_size(
         tox: *const Tox,
         friend_number: Tox_Friend_Number,
@@ -585,7 +586,10 @@ extern "C" {
 // ---------------------------------------------------------------------------
 
 extern "C" {
-    pub fn tox_callback_self_connection_status(tox: *mut Tox, callback: Option<tox_self_connection_status_cb>);
+    pub fn tox_callback_self_connection_status(
+        tox: *mut Tox,
+        callback: Option<tox_self_connection_status_cb>,
+    );
     pub fn tox_callback_friend_request(tox: *mut Tox, callback: Option<tox_friend_request_cb>);
     pub fn tox_callback_friend_message(tox: *mut Tox, callback: Option<tox_friend_message_cb>);
     pub fn tox_callback_friend_name(tox: *mut Tox, callback: Option<tox_friend_name_cb>);
@@ -607,7 +611,10 @@ extern "C" {
         tox: *mut Tox,
         callback: Option<tox_file_recv_control_cb>,
     );
-    pub fn tox_callback_file_chunk_request(tox: *mut Tox, callback: Option<tox_file_chunk_request_cb>);
+    pub fn tox_callback_file_chunk_request(
+        tox: *mut Tox,
+        callback: Option<tox_file_chunk_request_cb>,
+    );
     pub fn tox_callback_file_recv(tox: *mut Tox, callback: Option<tox_file_recv_cb>);
     pub fn tox_callback_file_recv_chunk(tox: *mut Tox, callback: Option<tox_file_recv_chunk_cb>);
 }

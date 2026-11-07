@@ -3,6 +3,7 @@
 use crate::commands::{FileSendRequest, ToxCommand};
 use crate::events::{ConnectionStatus, FriendEvent, FriendInfo, ToxEvent, UserStatus};
 use crate::identity::{Identity, IdentityStore};
+use crate::private_file::{create_dir_private, write_private};
 use crate::{ToxConfig, ToxHandle};
 use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
@@ -265,27 +266,68 @@ extern "C" fn on_file_recv_chunk(
         return;
     }
     let ctx = unsafe { &*(user_data as *const CallbackCtx) };
+    let key = (friend_number, file_number);
     let mut st = ctx.state.lock().unwrap();
-    if let Some(inc) = st.incoming.get_mut(&(friend_number, file_number)) {
-        if length == 0 || data.is_null() {
-            let _ = inc.file.flush();
-            let dest = inc.dest.clone();
-            let written = inc.written;
-            st.incoming.remove(&(friend_number, file_number));
-            let _ = ctx.events.send(ToxEvent::Notice(format!(
-                "received {} ({written} bytes)",
-                dest.display()
-            )));
+
+    // outcome: keep, finish(ok), or fail(reason)
+    enum Outcome {
+        Keep,
+        Done(u64),
+        Fail(String),
+    }
+
+    let outcome = {
+        let Some(inc) = st.incoming.get_mut(&key) else {
+            drop(st);
+            log::debug!("chunk for unknown transfer {friend_number}/{file_number}");
             return;
+        };
+
+        if length == 0 || data.is_null() {
+            match inc.file.flush() {
+                Ok(()) => Outcome::Done(inc.written),
+                Err(e) => Outcome::Fail(format!("flush: {e}")),
+            }
+        } else {
+            let end = position.saturating_add(length as u64);
+            if end > inc.size {
+                Outcome::Fail(format!("size exceeded ({end} > {})", inc.size))
+            } else {
+                let slice = unsafe { std::slice::from_raw_parts(data, length) };
+                match inc
+                    .file
+                    .seek(SeekFrom::Start(position))
+                    .and_then(|_| inc.file.write_all(slice))
+                {
+                    Ok(()) => {
+                        inc.written = end;
+                        Outcome::Keep
+                    }
+                    Err(e) => Outcome::Fail(format!("write: {e}")),
+                }
+            }
         }
-        let slice = unsafe { std::slice::from_raw_parts(data, length) };
-        if inc.file.seek(SeekFrom::Start(position)).is_ok()
-            && inc.file.write_all(slice).is_ok()
-        {
-            inc.written = position + length as u64;
+    };
+
+    match outcome {
+        Outcome::Keep => {}
+        Outcome::Done(written) => {
+            if let Some(inc) = st.incoming.remove(&key) {
+                let _ = ctx.events.send(ToxEvent::Notice(format!(
+                    "received {} ({written} bytes)",
+                    inc.dest.display()
+                )));
+            }
         }
-    } else {
-        log::debug!("chunk for unknown transfer {friend_number}/{file_number}");
+        Outcome::Fail(reason) => {
+            log::error!("receive {reason} for {friend_number}/{file_number}");
+            if let Some(inc) = st.incoming.remove(&key) {
+                let _ = ctx.events.send(ToxEvent::Notice(format!(
+                    "receive failed ({reason}): {}",
+                    inc.dest.display()
+                )));
+            }
+        }
     }
 }
 
@@ -301,10 +343,14 @@ extern "C" fn on_file_chunk_request(
         return;
     }
     let ctx = unsafe { &*(user_data as *const CallbackCtx) };
+
+    // length == 0 is the protocol's "send final empty chunk" signal
+    let is_final = length == 0;
     let chunk = {
         let mut st = ctx.state.lock().unwrap();
         match st.outgoing.get_mut(&(friend_number, file_number)) {
             None => None,
+            Some(_) if is_final => Some(Vec::new()),
             Some(out) => {
                 let mut buf = vec![0u8; length];
                 if out.file.seek(SeekFrom::Start(position)).is_err() {
@@ -340,11 +386,30 @@ extern "C" fn on_file_chunk_request(
                     &mut err,
                 )
             };
-            if !ok {
+            if ok {
+                if is_final {
+                    // normal completion: drop state, do not Cancel
+                    let mut st = ctx.state.lock().unwrap();
+                    if let Some(out) = st.outgoing.remove(&(friend_number, file_number)) {
+                        let _ = ctx.events.send(ToxEvent::Notice(format!(
+                            "finished sending {}",
+                            out.path.display()
+                        )));
+                    }
+                }
+            } else {
                 log::warn!("tox_file_send_chunk failed: {err:?}");
+                let mut st = ctx.state.lock().unwrap();
+                if let Some(out) = st.outgoing.remove(&(friend_number, file_number)) {
+                    let _ = ctx.events.send(ToxEvent::Notice(format!(
+                        "send failed for {}",
+                        out.path.display()
+                    )));
+                }
             }
         }
         None => {
+            // read/seek error (or transfer already gone): cancel and drop state
             let mut err = tox_sys::Tox_Err_File_Control::Ok;
             unsafe {
                 tox_sys::tox_file_control(
@@ -357,8 +422,9 @@ extern "C" fn on_file_chunk_request(
             }
             let mut st = ctx.state.lock().unwrap();
             if let Some(out) = st.outgoing.remove(&(friend_number, file_number)) {
+                log::error!("outgoing read failed for {}", out.path.display());
                 let _ = ctx.events.send(ToxEvent::Notice(format!(
-                    "finished sending {}",
+                    "send failed for {}",
                     out.path.display()
                 )));
             }
@@ -441,8 +507,7 @@ fn bootstrap_all(tox: *mut tox_sys::Tox, nodes: &[(String, u16, String)]) {
         let mut key = [0u8; tox_sys::TOX_DHT_ID_SIZE];
         key.copy_from_slice(&key_bytes);
         let mut err = tox_sys::Tox_Err_Bootstrap::Ok;
-        let ok =
-            unsafe { tox_sys::tox_bootstrap(tox, c_host.as_ptr(), *port, &key, &mut err) };
+        let ok = unsafe { tox_sys::tox_bootstrap(tox, c_host.as_ptr(), *port, &key, &mut err) };
         if !ok {
             log::debug!("bootstrap {host}:{port} failed: {err:?}");
         } else {
@@ -454,7 +519,6 @@ fn bootstrap_all(tox: *mut tox_sys::Tox, nodes: &[(String, u16, String)]) {
 // ---------------------------------------------------------------------------
 // Command handling
 // ---------------------------------------------------------------------------
-
 
 fn collect_friend_list(tox: *mut tox_sys::Tox) -> Vec<FriendInfo> {
     unsafe {
@@ -501,11 +565,11 @@ fn collect_friend_list(tox: *mut tox_sys::Tox) -> Vec<FriendInfo> {
             }
 
             let mut err_c = tox_sys::Tox_Err_Friend_Query::Ok;
-            let connection =
-                ConnectionStatus::from_raw(tox_sys::tox_friend_get_connection_status(tox, num, &mut err_c));
+            let connection = ConnectionStatus::from_raw(tox_sys::tox_friend_get_connection_status(
+                tox, num, &mut err_c,
+            ));
             let mut err_u = tox_sys::Tox_Err_Friend_Query::Ok;
-            let status =
-                UserStatus::from_raw(tox_sys::tox_friend_get_status(tox, num, &mut err_u));
+            let status = UserStatus::from_raw(tox_sys::tox_friend_get_status(tox, num, &mut err_u));
 
             out.push(FriendInfo {
                 number: num,
@@ -520,6 +584,7 @@ fn collect_friend_list(tox: *mut tox_sys::Tox) -> Vec<FriendInfo> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_command(
     tox: *mut tox_sys::Tox,
     cmd: ToxCommand,
@@ -527,6 +592,8 @@ fn handle_command(
     events: &mpsc::UnboundedSender<ToxEvent>,
     save_path: &Path,
     shutdown: &mut bool,
+    bootstrap: &[(String, u16, String)],
+    last_bootstrap: &mut std::time::Instant,
 ) {
     match cmd {
         ToxCommand::SendMessage {
@@ -568,8 +635,9 @@ fn handle_command(
         ToxCommand::AddFriend { address, message } => {
             let addr_hex: String = address.chars().filter(|c| c.is_ascii_hexdigit()).collect();
             let Ok(addr_bytes) = hex::decode(&addr_hex) else {
-                let _ = events
-                    .send(ToxEvent::Notice("invalid Tox ID (need 76 hex chars)".into()));
+                let _ = events.send(ToxEvent::Notice(
+                    "invalid Tox ID (need 76 hex chars)".into(),
+                ));
                 return;
             };
             if addr_bytes.len() != tox_sys::TOX_ADDRESS_SIZE {
@@ -584,8 +652,9 @@ fn handle_command(
             addr.copy_from_slice(&addr_bytes);
             let msg_bytes = message.as_bytes();
             let mut err = tox_sys::Tox_Err_Friend_Add::Ok;
-            let fn_num =
-                unsafe { tox_sys::tox_friend_add(tox, &addr, msg_bytes.as_ptr(), msg_bytes.len(), &mut err) };
+            let fn_num = unsafe {
+                tox_sys::tox_friend_add(tox, &addr, msg_bytes.as_ptr(), msg_bytes.len(), &mut err)
+            };
             match err {
                 tox_sys::Tox_Err_Friend_Add::Ok => {
                     let _ = events.send(ToxEvent::Notice(format!(
@@ -598,7 +667,10 @@ fn handle_command(
             }
         }
         ToxCommand::AcceptFriendRequest { public_key } => {
-            let pk_hex: String = public_key.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+            let pk_hex: String = public_key
+                .chars()
+                .filter(|c| c.is_ascii_hexdigit())
+                .collect();
             let Ok(pk_bytes) = hex::decode(&pk_hex) else {
                 let _ = events.send(ToxEvent::Notice("invalid public key".into()));
                 return;
@@ -623,8 +695,11 @@ fn handle_command(
             }
         }
         ToxCommand::DeclineFriendRequest { public_key } => {
-            log::info!("declined friend request {public_key}");
-            let _ = events.send(ToxEvent::Notice("friend request declined".into()));
+            // c-toxcore has no "reject request" API; the UI drops it locally.
+            log::info!("dismissing friend request {public_key} (local only)");
+            let _ = events.send(ToxEvent::Notice(
+                "friend request dismissed (local only)".into(),
+            ));
         }
         ToxCommand::DeleteFriend { friend_number } => {
             let mut err = tox_sys::Tox_Err_Friend_Delete::Ok;
@@ -712,43 +787,21 @@ fn handle_command(
                 let _ = events.send(ToxEvent::Notice("no such incoming file".into()));
                 return;
             };
-            let _ = std::fs::create_dir_all(&dest_dir);
-            let safe_name: String = filename
-                .chars()
-                .map(|c| if c.is_control() || c == '/' || c == '\\' { '_' } else { c })
-                .collect();
-            let dest = unique_path(&dest_dir, &safe_name);
-            match File::create(&dest) {
-                Ok(f) => {
-                    let mut err = tox_sys::Tox_Err_File_Control::Ok;
-                    let ok = unsafe {
-                        tox_sys::tox_file_control(
-                            tox,
-                            friend_number,
-                            file_number,
-                            tox_sys::Tox_File_Control::Resume,
-                            &mut err,
-                        )
-                    };
-                    if ok {
-                        let mut st = state.lock().unwrap();
-                        st.incoming.insert(
-                            (friend_number, file_number),
-                            IncomingFile {
-                                file: f,
-                                dest: dest.clone(),
-                                size: file_size,
-                                written: 0,
-                            },
-                        );
-                        drop(st);
-                        let _ = events.send(ToxEvent::Notice(format!(
-                            "accepting {filename} → {}",
-                            dest.display()
-                        )));
-                    } else {
-                        let _ = events.send(ToxEvent::Notice(format!("accept failed: {err:?}")));
-                    }
+            let _ = create_dir_private(&dest_dir);
+            let safe_name = sanitize_filename(&filename);
+            match unique_path_for(&dest_dir, &safe_name) {
+                Ok((dest, f)) => {
+                    finish_accept(
+                        tox,
+                        state,
+                        events,
+                        friend_number,
+                        file_number,
+                        f,
+                        dest,
+                        file_size,
+                        &filename,
+                    );
                 }
                 Err(e) => {
                     let _ = events.send(ToxEvent::Notice(format!("create failed: {e}")));
@@ -778,7 +831,8 @@ fn handle_command(
         }
         ToxCommand::SetName(name) => {
             let mut err = tox_sys::Tox_Err_Set_Info::Ok;
-            let ok = unsafe { tox_sys::tox_self_set_name(tox, name.as_ptr(), name.len(), &mut err) };
+            let ok =
+                unsafe { tox_sys::tox_self_set_name(tox, name.as_ptr(), name.len(), &mut err) };
             if !ok {
                 let _ = events.send(ToxEvent::Notice(format!("set name failed: {err:?}")));
             } else {
@@ -797,30 +851,30 @@ fn handle_command(
             }
         }
         ToxCommand::Reconnect => {
-            let _ = events.send(ToxEvent::Notice("reconnecting…".into()));
+            bootstrap_all(tox, bootstrap);
+            *last_bootstrap = std::time::Instant::now();
+            let _ = events.send(ToxEvent::Notice("reconnecting (re-bootstrapped)".into()));
         }
         ToxCommand::RefreshFriends => {
             let list = collect_friend_list(tox);
             let _ = events.send(ToxEvent::FriendList(list));
         }
-        ToxCommand::QueryLocalInfo => {
-            unsafe {
-                let mut address = [0u8; tox_sys::TOX_ADDRESS_SIZE];
-                let mut pk = [0u8; tox_sys::TOX_PUBLIC_KEY_SIZE];
-                let mut dht = [0u8; tox_sys::TOX_DHT_ID_SIZE];
-                tox_sys::tox_self_get_address(tox, &mut address);
-                tox_sys::tox_self_get_public_key(tox, &mut pk);
-                tox_sys::tox_self_get_dht_id(tox, &mut dht);
-                let mut err = tox_sys::Tox_Err_Get_Port::Ok;
-                let port = tox_sys::tox_self_get_udp_port(tox, &mut err);
-                let _ = events.send(ToxEvent::LocalInfo {
-                    address: hex::encode(address),
-                    public_key: hex::encode(pk),
-                    dht_id: hex::encode(dht),
-                    udp_port: port,
-                });
-            }
-        }
+        ToxCommand::QueryLocalInfo => unsafe {
+            let mut address = [0u8; tox_sys::TOX_ADDRESS_SIZE];
+            let mut pk = [0u8; tox_sys::TOX_PUBLIC_KEY_SIZE];
+            let mut dht = [0u8; tox_sys::TOX_DHT_ID_SIZE];
+            tox_sys::tox_self_get_address(tox, &mut address);
+            tox_sys::tox_self_get_public_key(tox, &mut pk);
+            tox_sys::tox_self_get_dht_id(tox, &mut dht);
+            let mut err = tox_sys::Tox_Err_Get_Port::Ok;
+            let port = tox_sys::tox_self_get_udp_port(tox, &mut err);
+            let _ = events.send(ToxEvent::LocalInfo {
+                address: hex::encode(address),
+                public_key: hex::encode(pk),
+                dht_id: hex::encode(dht),
+                udp_port: port,
+            });
+        },
         ToxCommand::BootstrapOnce {
             host,
             port,
@@ -856,11 +910,25 @@ fn handle_command(
     }
 }
 
-fn unique_path(dir: &Path, name: &str) -> PathBuf {
+// create a new file without ever overwriting an existing path.
+// tries `name`, then "name (1)", "name (2)", ...
+pub fn unique_path_for(dir: &Path, name: &str) -> std::io::Result<(PathBuf, File)> {
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let open = |p: &Path| {
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true);
+        #[cfg(unix)]
+        o.mode(0o600);
+        o.open(p)
+    };
+
     let direct = dir.join(name);
-    if !direct.exists() {
-        return direct;
+    if let Ok(f) = open(&direct) {
+        return Ok((direct, f));
     }
+
     let stem = std::path::Path::new(name)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -869,13 +937,92 @@ fn unique_path(dir: &Path, name: &str) -> PathBuf {
         .extension()
         .map(|s| format!(".{}", s.to_string_lossy()))
         .unwrap_or_default();
-    for i in 1..1000 {
+
+    for i in 1..10_000 {
         let candidate = dir.join(format!("{stem} ({i}){ext}"));
-        if !candidate.exists() {
-            return candidate;
+        if let Ok(f) = open(&candidate) {
+            return Ok((candidate, f));
         }
     }
-    dir.join(format!("{stem}-{}.{}", std::process::id(), name))
+    let fallback = dir.join(format!("{stem}-{}", std::process::id()));
+    let f = open(&fallback)?;
+    Ok((fallback, f))
+}
+
+// strip control chars / path separators; "" "." ".." become "download".
+pub fn sanitize_filename(name: &str) -> String {
+    let mut cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || c == '/' || c == '\\' || c == '\0' {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    // collapse any leftover path-ish junk from the original
+    while cleaned.contains("..") {
+        cleaned = cleaned.replace("..", "_");
+    }
+    cleaned = cleaned.trim().trim_matches('.').trim().to_string();
+    // empty or pure punctuation after cleanup is not a usable name
+    if cleaned.is_empty() || cleaned.chars().all(|c| matches!(c, '.' | '_' | ' ')) {
+        return "download".into();
+    }
+    // keep it a reasonable single path segment
+    if cleaned.len() > 200 {
+        let ext = std::path::Path::new(&cleaned)
+            .extension()
+            .map(|s| format!(".{}", s.to_string_lossy()))
+            .unwrap_or_default();
+        let stem: String = cleaned.chars().take(180).collect();
+        cleaned = format!("{stem}{ext}");
+    }
+    cleaned
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_accept(
+    tox: *mut tox_sys::Tox,
+    state: &Arc<Mutex<CoreState>>,
+    events: &mpsc::UnboundedSender<ToxEvent>,
+    friend_number: u32,
+    file_number: u32,
+    f: File,
+    dest: PathBuf,
+    file_size: u64,
+    filename: &str,
+) {
+    let mut err = tox_sys::Tox_Err_File_Control::Ok;
+    let ok = unsafe {
+        tox_sys::tox_file_control(
+            tox,
+            friend_number,
+            file_number,
+            tox_sys::Tox_File_Control::Resume,
+            &mut err,
+        )
+    };
+    if ok {
+        let mut st = state.lock().unwrap();
+        st.incoming.insert(
+            (friend_number, file_number),
+            IncomingFile {
+                file: f,
+                dest: dest.clone(),
+                size: file_size,
+                written: 0,
+            },
+        );
+        drop(st);
+        let _ = events.send(ToxEvent::Notice(format!(
+            "accepting {filename} → {}",
+            dest.display()
+        )));
+    } else {
+        let _ = events.send(ToxEvent::Notice(format!("accept failed: {err:?}")));
+    }
 }
 
 fn save_tox(tox: *mut tox_sys::Tox, path: &Path) {
@@ -883,7 +1030,7 @@ fn save_tox(tox: *mut tox_sys::Tox, path: &Path) {
         let size = tox_sys::tox_get_savedata_size(tox);
         let mut buf = vec![0u8; size];
         tox_sys::tox_get_savedata(tox, buf.as_mut_ptr());
-        if let Err(e) = std::fs::write(path, &buf) {
+        if let Err(e) = write_private(path, &buf) {
             log::error!("failed to save tox.save: {e}");
         }
     }
@@ -900,8 +1047,7 @@ pub(crate) async fn spawn(config: ToxConfig) -> Result<ToxHandle> {
 
     let worker = tokio::task::spawn_blocking(move || -> Result<()> {
         let data_dir = config.data_dir.clone();
-        std::fs::create_dir_all(&data_dir)
-            .with_context(|| format!("create {}", data_dir.display()))?;
+        create_dir_private(&data_dir).with_context(|| format!("create {}", data_dir.display()))?;
         let identity_store = IdentityStore::new(&data_dir)?;
         let state = Arc::new(Mutex::new(CoreState::default()));
         let bootstrap = config.bootstrap.clone();
@@ -956,15 +1102,12 @@ pub(crate) async fn spawn(config: ToxConfig) -> Result<ToxHandle> {
 
             let mut address = [0u8; tox_sys::TOX_ADDRESS_SIZE];
             let mut pk = [0u8; tox_sys::TOX_PUBLIC_KEY_SIZE];
-            let mut sk = [0u8; tox_sys::TOX_SECRET_KEY_SIZE];
             tox_sys::tox_self_get_address(tox, &mut address);
             tox_sys::tox_self_get_public_key(tox, &mut pk);
-            tox_sys::tox_self_get_secret_key(tox, &mut sk);
 
             let identity = Identity {
                 address: hex::encode(address),
                 public_key: hex::encode(pk),
-                secret_key: Some(hex::encode(sk)),
             };
 
             let ctx = Box::new(CallbackCtx {
@@ -1010,7 +1153,16 @@ pub(crate) async fn spawn(config: ToxConfig) -> Result<ToxHandle> {
             loop {
                 match cmd_rx.try_recv() {
                     Ok(cmd) => {
-                        handle_command(tox, cmd, &state, &evt_tx, &save_path, &mut shutdown);
+                        handle_command(
+                            tox,
+                            cmd,
+                            &state,
+                            &evt_tx,
+                            &save_path,
+                            &mut shutdown,
+                            &bootstrap,
+                            &mut last_bootstrap,
+                        );
                         if shutdown {
                             break;
                         }
@@ -1042,12 +1194,20 @@ pub(crate) async fn spawn(config: ToxConfig) -> Result<ToxHandle> {
 
             // Sleep until the next deadline, waking early for commands.
             let sleep_ms = (interval as u64).clamp(1, 1000);
-            let deadline =
-                std::time::Instant::now() + std::time::Duration::from_millis(sleep_ms);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(sleep_ms);
             while std::time::Instant::now() < deadline {
                 match cmd_rx.try_recv() {
                     Ok(cmd) => {
-                        handle_command(tox, cmd, &state, &evt_tx, &save_path, &mut shutdown);
+                        handle_command(
+                            tox,
+                            cmd,
+                            &state,
+                            &evt_tx,
+                            &save_path,
+                            &mut shutdown,
+                            &bootstrap,
+                            &mut last_bootstrap,
+                        );
                         break; // handle, then re-enter main loop promptly
                     }
                     Err(mpsc::error::TryRecvError::Empty) => {
@@ -1090,4 +1250,72 @@ pub(crate) async fn spawn(config: ToxConfig) -> Result<ToxHandle> {
         events: evt_rx,
         identity,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_strips_path_and_control() {
+        assert_eq!(sanitize_filename("report.pdf"), "report.pdf");
+        assert_eq!(sanitize_filename("../../etc/passwd"), "____etc_passwd");
+        assert_eq!(sanitize_filename("a/b\\c.txt"), "a_b_c.txt");
+        assert_eq!(sanitize_filename("bad\nname\0.txt"), "bad_name_.txt");
+        assert_eq!(sanitize_filename(".."), "download");
+        assert_eq!(sanitize_filename("."), "download");
+        assert_eq!(sanitize_filename(""), "download");
+        assert_eq!(sanitize_filename("   "), "download");
+        assert_eq!(sanitize_filename("..."), "download");
+        assert_eq!(sanitize_filename("normal name.txt"), "normal name.txt");
+        // no path separators survive
+        let out = sanitize_filename("../evil/../file.txt");
+        assert!(!out.contains('/'), "got {out:?}");
+        assert!(!out.contains('\\'), "got {out:?}");
+        assert!(!out.contains(".."), "got {out:?}");
+    }
+
+    #[test]
+    fn sanitize_truncates_long_names() {
+        let long = format!("{}.txt", "x".repeat(500));
+        let out = sanitize_filename(&long);
+        assert!(out.len() <= 200, "got {} bytes", out.len());
+        assert!(out.ends_with(".txt"));
+    }
+
+    #[test]
+    fn unique_path_for_never_overwrites() {
+        let dir = std::env::temp_dir().join(format!("tox-up-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let (p1, f1) = unique_path_for(&dir, "file.txt").unwrap();
+        drop(f1);
+        std::fs::write(&p1, b"first").unwrap();
+
+        let (p2, f2) = unique_path_for(&dir, "file.txt").unwrap();
+        drop(f2);
+        assert_ne!(p1, p2);
+        assert!(p2.to_string_lossy().contains("(1)"));
+        // original untouched
+        assert_eq!(std::fs::read(&p1).unwrap(), b"first");
+        // second file empty/new
+        assert_eq!(std::fs::read(&p2).unwrap(), b"");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unique_path_for_is_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("tox-upm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (p, f) = unique_path_for(&dir, "secret.bin").unwrap();
+        drop(f);
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

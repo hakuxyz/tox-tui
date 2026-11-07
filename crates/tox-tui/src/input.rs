@@ -78,10 +78,7 @@ fn global_nav_key(app: &mut App, key: KeyEvent) -> Result<Option<bool>> {
         KeyCode::Char('t') => {
             app.dialog = Dialog::ThemePicker;
             let names = app.theme_names();
-            app.selected_theme = names
-                .iter()
-                .position(|n| n == &app.theme.name)
-                .unwrap_or(0);
+            app.selected_theme = names.iter().position(|n| n == &app.theme.name).unwrap_or(0);
             Ok(Some(false))
         }
         // 1–9 jump to friend
@@ -197,7 +194,9 @@ async fn handle_sidebar_key(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         KeyCode::Enter => {
-            if !app.requests.is_empty() && app.selected_friend == 0 && app.selected_request < app.requests.len()
+            if !app.requests.is_empty()
+                && app.selected_friend == 0
+                && app.selected_request < app.requests.len()
             {
                 // on a request row → accept
                 app.accept_selected_request()?;
@@ -312,8 +311,7 @@ async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> Result<bool> {
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     if !names.is_empty() {
-                        app.selected_theme =
-                            (app.selected_theme + names.len() - 1) % names.len();
+                        app.selected_theme = (app.selected_theme + names.len() - 1) % names.len();
                     }
                 }
                 KeyCode::Enter => {
@@ -347,10 +345,8 @@ async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> Result<bool> {
                     } else {
                         app.dialog_input2.clone()
                     };
-                    app.tox.send(tox_client::ToxCommand::AddFriend {
-                        address,
-                        message,
-                    })?;
+                    app.tox
+                        .send(tox_client::ToxCommand::AddFriend { address, message })?;
                     app.dialog = Dialog::None;
                     app.dialog_input.clear();
                     app.dialog_input2.clear();
@@ -379,10 +375,9 @@ async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> Result<bool> {
         },
         Dialog::SendFile => match key.code {
             KeyCode::Enter => {
-                if let (Some(fn_num), Some(path)) = (
-                    app.current_friend_number(),
-                    Some(app.dialog_input.clone()),
-                ) {
+                if let (Some(fn_num), Some(path)) =
+                    (app.current_friend_number(), Some(app.dialog_input.clone()))
+                {
                     if !path.trim().is_empty() {
                         app.tox.send(tox_client::ToxCommand::SendFile(
                             tox_client::FileSendRequest {
@@ -436,7 +431,8 @@ async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> Result<bool> {
             KeyCode::Enter => {
                 let name = app.dialog_input.clone();
                 if !name.trim().is_empty() {
-                    app.tox.send(tox_client::ToxCommand::SetName(name.clone()))?;
+                    app.tox
+                        .send(tox_client::ToxCommand::SetName(name.clone()))?;
                     app.self_name = name;
                 }
                 app.dialog = Dialog::None;
@@ -453,8 +449,7 @@ async fn handle_dialog_key(app: &mut App, key: KeyEvent) -> Result<bool> {
         Dialog::SetStatus => match key.code {
             KeyCode::Enter => {
                 let sm = app.dialog_input.clone();
-                app.tox
-                    .send(tox_client::ToxCommand::SetStatusMessage(sm))?;
+                app.tox.send(tox_client::ToxCommand::SetStatusMessage(sm))?;
                 app.dialog = Dialog::None;
                 app.focus = Focus::Sidebar;
             }

@@ -144,9 +144,7 @@ impl App {
         let identity_address = tox.identity().address.clone();
         let history = HistoryStore::new(&data_dir)?;
         let themes = ThemeRegistry::load(&data_dir)?;
-        let theme = themes
-            .get(&themes.active)
-            .unwrap_or_default();
+        let theme = themes.get(&themes.active).unwrap_or_default();
 
         let mut app = Self {
             should_quit: false,
@@ -206,11 +204,7 @@ impl App {
             } => {
                 self.log
                     .push(format!("friend request from {}", short(&public_key)));
-                if !self
-                    .requests
-                    .iter()
-                    .any(|r| r.public_key == public_key)
-                {
+                if !self.requests.iter().any(|r| r.public_key == public_key) {
                     self.requests.push(PendingRequest {
                         public_key,
                         message,
@@ -240,13 +234,13 @@ impl App {
                         outgoing: false,
                         action,
                     };
-                    let _ = self.history.append(
-                        &key,
-                        HistoryEntry::now(false, action, text, None),
-                    );
+                    let _ = self
+                        .history
+                        .append(&key, HistoryEntry::now(false, action, text, None));
                     if self.current_friend_number() == Some(friend_number) {
                         self.chat.push(line);
-                    } else if let Some(f) = self.friends.iter_mut().find(|f| f.number == friend_number)
+                    } else if let Some(f) =
+                        self.friends.iter_mut().find(|f| f.number == friend_number)
                     {
                         f.unread += 1;
                     }
@@ -280,7 +274,10 @@ impl App {
                     }
                 }
             }
-            ToxEvent::Friend { friend_number, event } => {
+            ToxEvent::Friend {
+                friend_number,
+                event,
+            } => {
                 if !self.friends.iter().any(|f| f.number == friend_number) {
                     // Unknown number (e.g. loaded profile) — create a stub and
                     // ask the core for a full refresh to fill in the key.
@@ -298,8 +295,7 @@ impl App {
                         FriendEvent::Disconnected => {
                             f.connection = ConnectionStatus::None;
                             f.typing = false;
-                            self.log
-                                .push(format!("{} went offline", f.display_name()));
+                            self.log.push(format!("{} went offline", f.display_name()));
                         }
                         FriendEvent::NameChanged(n) => {
                             let old = f.display_name().to_string();
@@ -342,8 +338,9 @@ impl App {
             } => {
                 use tox_sys::Tox_File_Control;
                 if matches!(control, Tox_File_Control::Cancel) {
-                    self.transfers
-                        .retain(|t| !(t.friend_number == friend_number && t.file_number == file_number));
+                    self.transfers.retain(|t| {
+                        !(t.friend_number == friend_number && t.file_number == file_number)
+                    });
                     self.log.push("file transfer cancelled".into());
                 } else if matches!(control, Tox_File_Control::Resume) {
                     if let Some(t) = self
@@ -453,7 +450,8 @@ impl App {
             let _ = key;
             self.load_chat_for_selected();
         }
-        self.log.push(format!("{} friends loaded", self.friends.len()));
+        self.log
+            .push(format!("{} friends loaded", self.friends.len()));
     }
 
     // stub friend by number until we know the key
@@ -519,12 +517,11 @@ impl App {
             }
             "file" if !arg.is_empty() => {
                 let path = PathBuf::from(arg);
-                self.tox.send(ToxCommand::SendFile(
-                    tox_client::FileSendRequest {
+                self.tox
+                    .send(ToxCommand::SendFile(tox_client::FileSendRequest {
                         friend_number: fn_num,
                         path,
-                    },
-                ))?;
+                    }))?;
             }
             "name" if !arg.is_empty() => {
                 self.tox.send(ToxCommand::SetName(arg.to_string()))?;
@@ -532,7 +529,8 @@ impl App {
                 self.log.push(format!("name set to {arg}"));
             }
             "status" if !arg.is_empty() => {
-                self.tox.send(ToxCommand::SetStatusMessage(arg.to_string()))?;
+                self.tox
+                    .send(ToxCommand::SetStatusMessage(arg.to_string()))?;
                 self.log.push(format!("status set to {arg}"));
             }
             "id" | "myid" => {
@@ -569,8 +567,7 @@ impl App {
                 self.should_quit = true;
             }
             _ => {
-                self.log
-                    .push(format!("unknown command /{cmd} — try /help"));
+                self.log.push(format!("unknown command /{cmd} — try /help"));
             }
         }
         Ok(())
@@ -607,12 +604,15 @@ impl App {
         }
         let idx = self.selected_request.min(self.requests.len() - 1);
         let pk = self.requests[idx].public_key.clone();
+        // toxcore has no reject API: this only dismisses the request locally.
         self.tox
             .send(ToxCommand::DeclineFriendRequest { public_key: pk })?;
         self.requests.remove(idx);
         if self.selected_request >= self.requests.len() && self.selected_request > 0 {
             self.selected_request -= 1;
         }
+        self.log
+            .push("friend request dismissed (local only)".into());
         Ok(())
     }
 

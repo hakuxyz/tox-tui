@@ -2,9 +2,7 @@
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tox_client::{
-    ConnectionStatus, FileSendRequest, ToxCommand, ToxConfig, ToxEvent, ToxHandle,
-};
+use tox_client::{ConnectionStatus, FileSendRequest, ToxCommand, ToxConfig, ToxEvent, ToxHandle};
 
 fn test_config(tag: &str) -> ToxConfig {
     let dir = std::env::temp_dir().join(format!(
@@ -89,8 +87,12 @@ fn info_parts(ev: ToxEvent) -> (String, String, String, u16) {
 
 // Bring two fresh instances up and make them DHT-connected.
 async fn connected_pair(tag_a: &str, tag_b: &str) -> (ToxHandle, ToxHandle) {
-    let mut a = tox_client::spawn(test_config(tag_a)).await.expect("spawn a");
-    let mut b = tox_client::spawn(test_config(tag_b)).await.expect("spawn b");
+    let mut a = tox_client::spawn(test_config(tag_a))
+        .await
+        .expect("spawn a");
+    let mut b = tox_client::spawn(test_config(tag_b))
+        .await
+        .expect("spawn b");
 
     let (_addr_a, _pk_a, dht_a, port_a) = info_parts(local_info(&mut a).await);
     let (_addr_b, _pk_b, dht_b, port_b) = info_parts(local_info(&mut b).await);
@@ -109,13 +111,17 @@ async fn connected_pair(tag_a: &str, tag_b: &str) -> (ToxHandle, ToxHandle) {
     })
     .unwrap();
 
-    let a_up = wait_for(&mut a, Duration::from_secs(15), |e| {
-        matches!(e, ToxEvent::SelfConnection(c) if c.is_online())
-    })
+    let a_up = wait_for(
+        &mut a,
+        Duration::from_secs(15),
+        |e| matches!(e, ToxEvent::SelfConnection(c) if c.is_online()),
+    )
     .await;
-    let b_up = wait_for(&mut b, Duration::from_secs(15), |e| {
-        matches!(e, ToxEvent::SelfConnection(c) if c.is_online())
-    })
+    let b_up = wait_for(
+        &mut b,
+        Duration::from_secs(15),
+        |e| matches!(e, ToxEvent::SelfConnection(c) if c.is_online()),
+    )
     .await;
     assert!(a_up, "instance A failed to come online");
     assert!(b_up, "instance B failed to come online");
@@ -150,7 +156,11 @@ async fn identity_create_persist_reload() {
     })
     .await
     .expect("respawn");
-    assert_eq!(h2.identity().address, addr1, "address stable across restarts");
+    assert_eq!(
+        h2.identity().address,
+        addr1,
+        "address stable across restarts"
+    );
 
     h2.send(ToxCommand::Shutdown).unwrap();
     drain_for(&mut h2, Duration::from_millis(300)).await;
@@ -172,9 +182,11 @@ async fn two_instances_connect_and_chat() {
     .unwrap();
 
     // B should receive the request.
-    let got_req = wait_for(&mut b, Duration::from_secs(20), |e| {
-        matches!(e, ToxEvent::FriendRequest { message, .. } if message == "hello from A")
-    })
+    let got_req = wait_for(
+        &mut b,
+        Duration::from_secs(20),
+        |e| matches!(e, ToxEvent::FriendRequest { message, .. } if message == "hello from A"),
+    )
     .await;
     assert!(got_req, "B did not receive friend request");
 
@@ -189,8 +201,13 @@ async fn two_instances_connect_and_chat() {
     // (A's friend_add already created A→B; B needs B→A which Accept does).
     // Wait until both report the friend online.
     let a_online = wait_for(&mut a, Duration::from_secs(30), |e| {
-        matches!(e, ToxEvent::Friend { event: tox_client::FriendEvent::Connected(_), .. })
-            || matches!(e, ToxEvent::FriendList(list) if !list.is_empty())
+        matches!(
+            e,
+            ToxEvent::Friend {
+                event: tox_client::FriendEvent::Connected(_),
+                ..
+            }
+        ) || matches!(e, ToxEvent::FriendList(list) if !list.is_empty())
     })
     .await;
     assert!(a_online, "A never saw friend come online / listed");
@@ -243,9 +260,11 @@ async fn two_instances_connect_and_chat() {
     })
     .unwrap();
 
-    let got_msg = wait_for(&mut b, Duration::from_secs(30), |e| {
-        matches!(e, ToxEvent::FriendMessage { text, .. } if text == "ping over tox")
-    })
+    let got_msg = wait_for(
+        &mut b,
+        Duration::from_secs(30),
+        |e| matches!(e, ToxEvent::FriendMessage { text, .. } if text == "ping over tox"),
+    )
     .await;
     assert!(got_msg, "B did not receive A's message");
 
@@ -257,9 +276,11 @@ async fn two_instances_connect_and_chat() {
             action: false,
         })
         .unwrap();
-        let got_pong = wait_for(&mut a, Duration::from_secs(30), |e| {
-            matches!(e, ToxEvent::FriendMessage { text, .. } if text == "pong")
-        })
+        let got_pong = wait_for(
+            &mut a,
+            Duration::from_secs(30),
+            |e| matches!(e, ToxEvent::FriendMessage { text, .. } if text == "pong"),
+        )
         .await;
         assert!(got_pong, "A did not receive B's reply");
     }
@@ -298,28 +319,29 @@ async fn file_transfer_roundtrip() {
     })
     .unwrap();
 
-    // Wait until A has a friend number and it's online.
+    // Wait until A sees the friend as actually online (not just listed).
     let mut a_fn = None;
     let deadline = Instant::now() + Duration::from_secs(30);
-    while Instant::now() < deadline && a_fn.is_none() {
-        if let Some(ev) = a.recv_event().await {
-            match ev {
-                ToxEvent::FriendList(list) => {
-                    if let Some(f) = list.first() {
-                        if f.connection.is_online() || true {
-                            a_fn = Some(f.number);
-                        }
-                    }
+    while Instant::now() < deadline {
+        match a.recv_event().await {
+            Some(ToxEvent::FriendList(list)) => {
+                if let Some(f) = list.iter().find(|f| f.connection.is_online()) {
+                    a_fn = Some(f.number);
+                    break;
                 }
-                ToxEvent::Friend {
-                    friend_number,
-                    event: tox_client::FriendEvent::Connected(_),
-                } => a_fn = Some(friend_number),
-                _ => {}
             }
+            Some(ToxEvent::Friend {
+                friend_number,
+                event: tox_client::FriendEvent::Connected(status),
+            }) if status.is_online() => {
+                a_fn = Some(friend_number);
+                break;
+            }
+            Some(_) => {}
+            None => break,
         }
     }
-    let a_fn = a_fn.expect("A friend number for file test");
+    let a_fn = a_fn.expect("A friend must be online before starting a file transfer");
 
     // Extra settle time for friend connection.
     drain_for(&mut a, Duration::from_secs(3)).await;

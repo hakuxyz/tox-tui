@@ -4,12 +4,14 @@ mod commands;
 mod events;
 mod history;
 mod identity;
+mod private_file;
 mod runner;
 
 pub use commands::{FileSendRequest, ToxCommand};
 pub use events::{ConnectionStatus, FriendEvent, FriendInfo, ToxEvent, UserStatus};
 pub use history::{HistoryEntry, HistoryStore};
 pub use identity::{Identity, IdentityStore};
+pub use runner::{sanitize_filename, unique_path_for};
 
 use anyhow::Result;
 use std::path::PathBuf;

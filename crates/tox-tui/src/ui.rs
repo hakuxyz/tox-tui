@@ -52,7 +52,10 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let line = Line::from(vec![
         Span::styled(
             " tox-tui ",
-            Style::default().fg(th.header_fg()).bg(th.header_bg()).bold(),
+            Style::default()
+                .fg(th.header_fg())
+                .bg(th.header_bg())
+                .bold(),
         ),
         Span::raw("  "),
         Span::styled(name, Style::default().add_modifier(Modifier::BOLD)),
@@ -60,7 +63,10 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(conn_text, conn_style),
         Span::raw("  "),
         Span::styled(
-            format!("id:{}…", &app.identity_address[..8.min(app.identity_address.len())]),
+            format!(
+                "id:{}…",
+                &app.identity_address[..8.min(app.identity_address.len())]
+            ),
             Style::default().fg(th.offline()),
         ),
         Span::raw("  "),
@@ -105,7 +111,11 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 Style::default().fg(th.warn())
             };
-            let label = format!(" {} {}…", if selected { "▶" } else { " " }, &r.public_key[..8]);
+            let label = format!(
+                " {} {}…",
+                if selected { "▶" } else { " " },
+                &r.public_key[..8]
+            );
             items.push(ListItem::new(Line::from(Span::styled(label, style))));
         }
         items.push(ListItem::new(Line::from("")));
@@ -124,7 +134,11 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     }
     for (i, fr) in app.friends.iter().enumerate() {
         let selected = i == app.selected_friend && app.selected_request == 0;
-        let dot = if fr.connection.is_online() { "●" } else { "○" };
+        let dot = if fr.connection.is_online() {
+            "●"
+        } else {
+            "○"
+        };
         let dot_color = if fr.connection.is_online() {
             th.online()
         } else {
@@ -137,10 +151,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
             " ".to_string()
         };
         let mut spans = vec![Span::styled(
-            format!(
-                "{}{hotkey} {dot} ",
-                if selected { "▶" } else { " " }
-            ),
+            format!("{}{hotkey} {dot} ", if selected { "▶" } else { " " }),
             Style::default().fg(dot_color),
         )];
         let name_style = if selected {
@@ -278,14 +289,12 @@ fn draw_chat(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    let para = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(border)
-                .title(title),
-        );
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false }).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(border)
+            .title(title),
+    );
     f.render_widget(para, area);
 }
 
@@ -382,7 +391,10 @@ fn draw_help(f: &mut Frame, app: &App) {
     let text = vec![
         Line::from(Span::styled("tox-tui keybindings", Style::default().bold())),
         Line::from(""),
-        Line::from(Span::styled("Global (outside input)", Style::default().fg(th.accent()))),
+        Line::from(Span::styled(
+            "Global (outside input)",
+            Style::default().fg(th.accent()),
+        )),
         Line::from("  Ctrl+Q / Ctrl+C   quit"),
         Line::from("  F1 / ?            toggle this help"),
         Line::from("  Tab               cycle focus: sidebar → chat → input"),
@@ -401,7 +413,7 @@ fn draw_help(f: &mut Frame, app: &App) {
         Line::from(Span::styled("Sidebar", Style::default().fg(th.accent()))),
         Line::from("  ↑↓ / j k          move selection (requests then friends)"),
         Line::from("  Enter             accept request / focus input on friend"),
-        Line::from("  r                 decline selected friend request"),
+        Line::from("  r                 dismiss selected friend request (local)"),
         Line::from("  Mouse click       select row · scroll wheel navigates"),
         Line::from(""),
         Line::from(Span::styled("Chat", Style::default().fg(th.accent()))),
@@ -412,7 +424,10 @@ fn draw_help(f: &mut Frame, app: &App) {
         Line::from("  Enter / i         focus input"),
         Line::from("  Mouse wheel       scroll"),
         Line::from(""),
-        Line::from(Span::styled("Slash commands", Style::default().fg(th.accent()))),
+        Line::from(Span::styled(
+            "Slash commands",
+            Style::default().fg(th.accent()),
+        )),
         Line::from("  /add <ToxID> [msg]  send friend request"),
         Line::from("  /file <path>        send file to current friend"),
         Line::from("  /me <text>          action message"),
@@ -456,7 +471,11 @@ fn draw_add_friend(f: &mut Frame, app: &App) {
     };
     let mut lines = vec![Line::from(format!(
         "Enter {}",
-        if app.dialog_step == 0 { "Tox ID" } else { "message" }
+        if app.dialog_step == 0 {
+            "Tox ID"
+        } else {
+            "message"
+        }
     ))];
     lines.push(Line::from(""));
     let display = if field.is_empty() { "…" } else { field };
@@ -617,7 +636,11 @@ fn draw_show_id(f: &mut Frame, app: &App) {
     let th = &app.theme;
     let id = &app.identity_address;
     // break the 76-char id into two lines
-    let chunks: Vec<&str> = id.as_bytes().chunks(38).map(|c| std::str::from_utf8(c).unwrap_or("")).collect();
+    let chunks: Vec<&str> = id
+        .as_bytes()
+        .chunks(38)
+        .map(|c| std::str::from_utf8(c).unwrap_or(""))
+        .collect();
     let mut lines = vec![
         Line::from(Span::styled(
             "Your Tox ID",
@@ -655,10 +678,11 @@ fn draw_theme_picker(f: &mut Frame, app: &App) {
     let area = centered_rect(50, 60, f.area());
     let th = &app.theme;
     let names = app.theme_names();
-    let mut lines = vec![Line::from(Span::styled(
-        "Select a theme (Enter / number, Esc cancel)",
-        Style::default().fg(th.log()),
-    )),
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "Select a theme (Enter / number, Esc cancel)",
+            Style::default().fg(th.log()),
+        )),
         Line::from(""),
     ];
     for (i, name) in names.iter().enumerate() {

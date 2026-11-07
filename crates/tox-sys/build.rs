@@ -24,7 +24,10 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", libdir.display());
     println!("cargo:rustc-link-lib=toxcore");
     println!("cargo:rerun-if-env-changed=TOXCORE_PREFIX");
-    println!("cargo:rerun-if-changed={}", incdir.join("tox/tox.h").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        incdir.join("tox/tox.h").display()
+    );
 
     // Runtime loader path for the final binary (emitted here so tox-tui picks it up
     // when it depends on this crate's link-search; also set explicitly in tox-tui).

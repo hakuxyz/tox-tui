@@ -17,13 +17,22 @@ pub enum ToxCommand {
         action: bool,
     },
     // Send a friend request with an address (76 hex chars) and greeting.
-    AddFriend { address: String, message: String },
+    AddFriend {
+        address: String,
+        message: String,
+    },
     // Accept an incoming friend request by public key (64 hex chars).
-    AcceptFriendRequest { public_key: String },
+    AcceptFriendRequest {
+        public_key: String,
+    },
     // Decline an incoming friend request (no protocol signal; just drop it).
-    DeclineFriendRequest { public_key: String },
+    DeclineFriendRequest {
+        public_key: String,
+    },
     // Remove a friend.
-    DeleteFriend { friend_number: u32 },
+    DeleteFriend {
+        friend_number: u32,
+    },
     // Start sending a file.
     SendFile(FileSendRequest),
     // Accept an incoming file transfer and write it under `dest_dir`.

@@ -24,7 +24,12 @@ pub struct HistoryEntry {
 }
 
 impl HistoryEntry {
-    pub fn now(outgoing: bool, action: bool, text: impl Into<String>, message_id: Option<u32>) -> Self {
+    pub fn now(
+        outgoing: bool,
+        action: bool,
+        text: impl Into<String>,
+        message_id: Option<u32>,
+    ) -> Self {
         Self {
             ts: Utc::now().timestamp(),
             outgoing,
@@ -35,8 +40,8 @@ impl HistoryEntry {
     }
 
     pub fn time_label(&self) -> String {
-        let dt: DateTime<Utc> = chrono::DateTime::from_timestamp(self.ts, 0)
-            .unwrap_or_else(Utc::now);
+        let dt: DateTime<Utc> =
+            chrono::DateTime::from_timestamp(self.ts, 0).unwrap_or_else(Utc::now);
         dt.format("%H:%M").to_string()
     }
 }
@@ -81,7 +86,11 @@ impl HistoryStore {
             }
             self.cache.insert(friend_key.to_string(), entries);
         }
-        Ok(self.cache.get(friend_key).map(|v| v.as_slice()).unwrap_or(&[]))
+        Ok(self
+            .cache
+            .get(friend_key)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]))
     }
 
     // Append one entry to disk and cache.

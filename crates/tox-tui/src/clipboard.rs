@@ -40,8 +40,7 @@ fn wayland(text: &str) -> bool {
 }
 
 fn x11(text: &str) -> bool {
-    pipe_to("xclip", &["-selection", "clipboard"], text)
-        || pipe_to("xsel", &["--clipboard"], text)
+    pipe_to("xclip", &["-selection", "clipboard"], text) || pipe_to("xsel", &["--clipboard"], text)
 }
 
 fn macos(text: &str) -> bool {
