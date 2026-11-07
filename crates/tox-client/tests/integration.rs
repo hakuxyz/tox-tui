@@ -68,12 +68,18 @@ async fn local_info(tox: &mut ToxHandle) -> tox_client::ToxEvent {
     tox.send(ToxCommand::QueryLocalInfo).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if let Some(ev) = tox.recv_event().await {
-            if matches!(ev, ToxEvent::LocalInfo { .. }) {
-                return ev;
-            }
-        } else {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
             break;
+        }
+        match tokio::time::timeout(remaining, tox.recv_event()).await {
+            Ok(Some(ev)) => {
+                if matches!(ev, ToxEvent::LocalInfo { .. }) {
+                    return ev;
+                }
+            }
+            Ok(None) => break,
+            Err(_) => break,
         }
     }
     panic!("no LocalInfo reply");
@@ -226,8 +232,14 @@ async fn two_instances_connect_and_chat() {
     let mut b_friend = None;
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline && (a_friend.is_none() || b_friend.is_none()) {
-        if let Some(ev) = a.recv_event().await {
-            match &ev {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        // short slice so both sockets keep being polled inside the deadline
+        let slice = remaining.min(Duration::from_millis(250));
+        match tokio::time::timeout(slice, a.recv_event()).await {
+            Ok(Some(ev)) => match &ev {
                 ToxEvent::FriendList(list) => {
                     if let Some(f) = list.first() {
                         a_friend = Some(f.number);
@@ -238,10 +250,12 @@ async fn two_instances_connect_and_chat() {
                     event: tox_client::FriendEvent::Connected(_),
                 } => a_friend = Some(*friend_number),
                 _ => {}
-            }
+            },
+            Ok(None) => break,
+            Err(_) => {}
         }
-        if let Some(ev) = b.recv_event().await {
-            match &ev {
+        match tokio::time::timeout(slice, b.recv_event()).await {
+            Ok(Some(ev)) => match &ev {
                 ToxEvent::FriendList(list) => {
                     if let Some(f) = list.first() {
                         b_friend = Some(f.number);
@@ -252,7 +266,9 @@ async fn two_instances_connect_and_chat() {
                     event: tox_client::FriendEvent::Connected(_),
                 } => b_friend = Some(*friend_number),
                 _ => {}
-            }
+            },
+            Ok(None) => break,
+            Err(_) => {}
         }
     }
 
