@@ -1,0 +1,9 @@
+[package]
+name = "tox-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Raw FFI bindings to c-toxcore"
+links = "toxcore"
+
+[dependencies]

@@ -1,0 +1,31 @@
+[package]
+name = "tox-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Terminal UI for the Tox P2P messenger"
+default-run = "tox-tui"
+
+[[bin]]
+name = "tox-tui"
+path = "src/main.rs"
+
+[dependencies]
+tox-client = { path = "../tox-client" }
+tox-sys = { path = "../tox-sys" }
+tokio = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true, features = ["event-stream"] }
+anyhow = { workspace = true }
+futures = "0.3"
+hex = { workspace = true }
+dirs = { workspace = true }
+chrono = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+toml = "0.8"
+serde = { workspace = true }
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = "3"

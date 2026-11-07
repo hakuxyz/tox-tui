@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tox-sys",
+    "crates/tox-client",
+    "crates/tox-tui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/example/tox-tui"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+ratatui = "0.29"
+crossterm = "0.28"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+hex = "0.4"
+dirs = "6"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+log = "0.4"
+env_logger = "0.11"
+rand = "0.8"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
