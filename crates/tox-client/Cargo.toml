@@ -11,7 +11,7 @@ keywords = ["tox", "p2p", "messaging", "async", "tokio"]
 categories = ["network-programming", "api-bindings"]
 
 [dependencies]
-tox-sys = { path = "../tox-sys", version = "0.1.0" }
+tox-sys = { path = "../tox-sys", version = "0.1.1" }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

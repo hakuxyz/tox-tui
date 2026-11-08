@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 tox-client = { path = "../tox-client", version = "0.1.0" }
-tox-sys = { path = "../tox-sys", version = "0.1.0" }
+tox-sys = { path = "../tox-sys", version = "0.1.1" }
 tokio = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true, features = ["event-stream"] }

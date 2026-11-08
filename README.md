@@ -8,6 +8,27 @@ tox is peer-to-peer messaging with end-to-end encryption. no phone number, no
 central server holding your chats. most of the old desktop clients (utox,
 qtox) are basically abandoned, so this is a fresh one written in rust.
 
+## install
+
+needs the c-toxcore library + `pkg-config` (crypto lives there):
+
+| distro | package |
+|--------|---------|
+| Debian / Ubuntu | `sudo apt install libtoxcore-dev pkg-config` |
+| Fedora | `sudo dnf install c-toxcore-devel pkgconf-pkg-config` |
+| openSUSE | `sudo zypper install c-toxcore-devel pkg-config` |
+| Alpine | `apk add toxcore-dev pkgconf` |
+| Arch | `sudo pacman -S c-toxcore pkgconf` |
+
+then:
+
+```bash
+cargo install tox-tui
+tox-tui
+```
+
+no package for your distro? build c-toxcore from source first (see [build](#build)).
+
 ## features
 
 - identity that survives restarts (`tox.save` + `identity.json`)
