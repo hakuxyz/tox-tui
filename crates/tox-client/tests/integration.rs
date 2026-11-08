@@ -232,11 +232,11 @@ async fn two_instances_connect_and_chat() {
     let mut b_friend = None;
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline && (a_friend.is_none() || b_friend.is_none()) {
+        // recompute before each wait so the pair cannot overshoot the deadline
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             break;
         }
-        // short slice so both sockets keep being polled inside the deadline
         let slice = remaining.min(Duration::from_millis(250));
         match tokio::time::timeout(slice, a.recv_event()).await {
             Ok(Some(ev)) => match &ev {
@@ -254,6 +254,11 @@ async fn two_instances_connect_and_chat() {
             Ok(None) => break,
             Err(_) => {}
         }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        let slice = remaining.min(Duration::from_millis(250));
         match tokio::time::timeout(slice, b.recv_event()).await {
             Ok(Some(ev)) => match &ev {
                 ToxEvent::FriendList(list) => {
