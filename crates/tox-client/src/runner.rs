@@ -283,11 +283,15 @@ extern "C" fn on_file_recv_chunk(
             return;
         };
 
-        if length == 0 || data.is_null() {
+        if length == 0 {
+            // protocol EOF signal (empty final chunk)
             match inc.file.flush() {
                 Ok(()) => Outcome::Done(inc.written),
                 Err(e) => Outcome::Fail(format!("flush: {e}")),
             }
+        } else if data.is_null() {
+            // positive length with no data is a broken callback, not a finish
+            Outcome::Fail("null data with nonzero length".into())
         } else {
             let end = position.saturating_add(length as u64);
             if end > inc.size {
