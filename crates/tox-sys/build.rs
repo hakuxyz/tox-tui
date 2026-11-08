@@ -2,6 +2,11 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    // docs.rs only runs rustdoc: no native link, no local c-toxcore required
+    if env::var("DOCS_RS").is_ok() {
+        return;
+    }
+
     let prefix = env::var("TOXCORE_PREFIX")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../local"));
