@@ -1,13 +1,6 @@
 // tox-tui — terminal tox messenger.
 
-mod app;
-mod clipboard;
-mod input;
-mod theme;
-mod ui;
-
 use anyhow::Result;
-use app::App;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -19,6 +12,8 @@ use ratatui::Terminal;
 use std::io;
 use std::time::Duration;
 use tox_client::ToxConfig;
+use tox_tui::app::App;
+use tox_tui::{input, ui};
 
 #[tokio::main]
 async fn main() -> Result<()> {
