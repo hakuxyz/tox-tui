@@ -29,7 +29,7 @@ jobs:
       - name: Build c-toxcore
         if: steps.cache-tox.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 --branch v0.2.24 https://github.com/TokTok/c-toxcore.git /tmp/c-toxcore
+          git clone --depth 1 --recurse-submodules --shallow-submodules --branch v0.2.24 https://github.com/TokTok/c-toxcore.git /tmp/c-toxcore
           cmake -S /tmp/c-toxcore -B /tmp/c-toxcore/build \
             -DCMAKE_INSTALL_PREFIX=$PWD/local \
             -DBUILD_TOXAV=OFF \
