@@ -17,7 +17,7 @@ jobs:
       - name: Install c-toxcore deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential libssl-dev libcurl4-openssl-dev libevent-dev
+          sudo apt-get install -y cmake build-essential libssl-dev libcurl4-openssl-dev libevent-dev libsodium-dev libvpx-dev
 
       - name: Cache c-toxcore
         id: cache-tox
